@@ -1,0 +1,184 @@
+#! /bin/bash
+# deploy
+# USAGE: $ ./deploy INSTALL|UPDATE
+
+# Check the main parameter
+if [ "$1" != "INSTALL" ] && [ "$1" != "UPDATE" ]; then
+    echo "USAGE: $ ./deploy INSTALL|UPDATE"
+    exit 1
+fi
+
+set -o errexit
+set -o nounset
+
+
+# Check that SSH-AGENT is running
+# Otherwise running the script would be painful
+ssh-add -l &>/dev/null && rc=$? || rc=$?
+if [ "$rc" -ne 0 ]; then
+    echo "You should run this script with a valid ssh-add session."
+    exit 1
+fi
+
+serviceName=xxxxx
+servicePort=xxxx
+
+# Local directories
+#   dist/therm-ctrl_amd64
+#   dist/therm-ctrl_armv6
+#   dist/init_systemd.conf
+#   dist/init_upstart.conf
+locDist="dist"
+# Server address
+srvHost=my.example.com
+srvHostPort=xx
+srvHostUser=xx
+# Server temporary distribution
+srvDist="/tmp/therm/dist"
+# Server target directories
+#   ~/therm/therm-ctrl
+#   ~/therm/init_systemd.conf
+srvAppRoot="/home/$srvHostUser/therm"
+
+
+# Checking existence of selected needed files
+[ -f "$locDist/therm-ctrl_amd64" ]
+[ -f "$locDist/therm-ctrl_armv6" ]
+[ -f "$locDist/init_systemd.conf" ]
+[ -f "$locDist/init_upstart.conf" ]
+
+
+# Server installation script
+install () {
+    set -o errexit
+    set -o nounset
+
+    # Checking required variables
+    echo "Installing to $(whoami)@$(hostname):$srvAppRoot"
+    echo "${srvAppRoot:?}" > /dev/null
+    echo "${srvDist:?}" > /dev/null
+    echo "${serviceName:?}" > /dev/null
+    echo "${servicePort:?}" > /dev/null
+    echo "${srvHost:?}" > /dev/null
+
+    # Stopping server
+    sudo service "$serviceName" stop || true
+
+    # Deploying dist
+    echo "  Deploying to $srvAppRoot/"
+    mkdir -p "$srvAppRoot/"
+    cp -r "$srvDist/"* "$srvAppRoot/"
+
+    # Choosing right binary
+    if uname -a | grep -q "x86_64"; then
+        echo "  Deploying linux_amd64 binary"
+        mv "$srvAppRoot/therm-ctrl_amd64" $"$srvAppRoot/therm-ctrl"
+        rm -f "$srvAppRoot/therm-ctrl_armv6"
+    elif uname -a | grep -q "armv6"; then
+        echo "  Deploying linux_armv6 binary"
+        mv "$srvAppRoot/therm-ctrl_armv6" $"$srvAppRoot/therm-ctrl"
+        rm -f "$srvAppRoot/therm-ctrl_amd64"
+    else
+        echo "  Unsupported architecture"
+        uname -a
+        exit 1
+    fi
+
+    # Configuring daemon
+    if [ -d "/run/systemd/system" ]; then
+        # Daemon run by systemd
+        echo "  Configuring systemd daemon"
+        rm -f "$srvAppRoot/init_upstart.conf"
+        serviceFile="/lib/systemd/system/$serviceName.service"
+        sudo ln -sf "$srvAppRoot/init_systemd.conf" "$serviceFile"
+        sudo ln -sf "$serviceFile" "/etc/systemd/system/multi-user.target.wants/"
+        sudo systemctl daemon-reload
+    else
+        # Daemon run by Upstart
+        echo "  Configuring upstart daemon"
+        rm -f "$srvAppRoot/init_systemd.conf"
+        sudo ln -sf "$srvAppRoot/init_upstart.conf" "/etc/init/$serviceName.conf"
+        sudo initctl reload-configuration
+    fi
+
+    # Creating RSA certificate for HTTPS
+    echo "  Creating RSA certificate"
+    openssl req -x509 -nodes -sha256 -days 3650 -newkey rsa:2048 -keyout "$srvAppRoot/privkey.pem" -out "$srvAppRoot/fullchain.pem" -subj "/C=FR/ST=Paris/L=Paris/O=Domotique/OU=Thermal/CN=$srvHost/emailAddress=postmaster@$srvHost"
+    chmod 600 "$srvAppRoot/fullchain.pem"
+    chmod 600 "$srvAppRoot/privkey.pem"
+
+    # Opening app port on firewall
+    echo "  Opening app port"
+    sudo ufw allow "$servicePort"
+
+    # Reloading service
+    echo "  Relaunching service"
+    sudo service "$serviceName" start
+
+    # Showing status
+    sudo service "$serviceName" status
+
+    # Cleaning-up dist folder
+    echo "  Cleaning-up dist forlder"
+    rm -r "$srvDist"
+
+    echo "  Installation successful :)"
+    exit 0
+}
+
+
+
+# Server bin update script
+update () {
+    set -o errexit
+    set -o nounset
+
+    # Checking required variables
+    echo "Updating to $(whoami)@$(hostname):$srvAppRoot"
+    echo "${srvAppRoot:?}" > /dev/null
+    echo "${srvDist:?}" > /dev/null
+    echo "${serviceName:?}" > /dev/null
+
+    # Stopping server
+    sudo service "$serviceName" stop || true
+
+    # Deploying the right binary
+    echo "  Deploying to $srvAppRoot/"
+    if uname -a | grep -q "x86_64"; then
+        echo "  Deploying linux_amd64 binary"
+        cp "$srvDist/therm-ctrl_amd64" $"$srvAppRoot/therm-ctrl"
+    elif uname -a | grep -q "armv6"; then
+        echo "  Deploying linux_armv6 binary"
+        cp "$srvDist/therm-ctrl_armv6" $"$srvAppRoot/therm-ctrl"
+    else
+        echo "  Unsupported architecture"
+        uname -a
+        exit 1
+    fi
+
+    # Reloading service
+    echo "  Relaunching service"
+    sudo service "$serviceName" start
+
+    # Showing status
+    sudo service "$serviceName" status
+
+    # Cleaning-up dist folder
+    echo "  Cleaning-up dist forlder"
+    rm -r "$srvDist"
+
+    echo "  Update successful :)"
+    exit 0
+}
+
+echo "Uploading distribution files to $srvHostUser@$srvHost:$srvHostPort:$srvDist"
+ssh -p $srvHostPort "$srvHostUser@$srvHost" "mkdir -p \"$srvDist/\""
+scp -rpP $srvHostPort "$locDist/"* "$srvHostUser@$srvHost:$srvDist"
+if [ "$1" == "INSTALL" ]; then
+    ssh -tp $srvHostPort "$srvHostUser@$srvHost" "$(typeset -f install); srvAppRoot=\"$srvAppRoot\" srvDist=\"$srvDist\" serviceName=\"$serviceName\" servicePort=\"$servicePort\" srvHost=\"$srvHost\" install"
+elif [ "$1" == "UPDATE" ]; then
+    ssh -tp $srvHostPort "$srvHostUser@$srvHost" "$(typeset -f update); srvAppRoot=\"$srvAppRoot\" srvDist=\"$srvDist\" serviceName=\"$serviceName\" update"
+fi
+
+echo "Deployment successful :)"
+exit 0

@@ -1,0 +1,5 @@
+*.swp
+dist/*
+init_systemd.conf
+init_upstart.conf
+
