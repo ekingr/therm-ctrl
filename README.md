@@ -10,19 +10,19 @@ Offering a simple API to read sensors status and set relays state.
 TODO
 ----
 
-[ ] Restrict incoming ip address to proxy server (192.168.xxx.xxx)
-[ ] Handle case when MSP is not connected
-[ ] Log interrupts
-[ ] Implement a constant-time validation of API KEY (see https://pkg.go.dev/crypto/subtle)
+- [ ] Restrict incoming ip address to proxy server (192.168.xxx.xxx)
+- [ ] Handle case when MSP is not connected
+- [ ] Log interrupts
+- [ ] Implement a constant-time validation of API KEY (see https://pkg.go.dev/crypto/subtle)
 
-[x] Inverse sensors status
-[x] Throttle when several relays need to change at the same time
-[x] Throttling relay state change
-[x] Build a time-out to disable relays when no GET for some time (eg. loss of connectivity)
-[x] Setup rpi properly (out of this project's scope, but has to be done)
-[x] daemon configuration
-[X] Start daemon after wireguard
-[x] Restart wireguard periodically
+- [x] Inverse sensors status
+- [x] Throttle when several relays need to change at the same time
+- [x] Throttling relay state change
+- [x] Build a time-out to disable relays when no GET for some time (eg. loss of connectivity)
+- [x] Setup rpi properly (out of this project's scope, but has to be done)
+- [x] daemon configuration
+- [X] Start daemon after wireguard
+- [x] Restart wireguard periodically
 
 
 Architecture
